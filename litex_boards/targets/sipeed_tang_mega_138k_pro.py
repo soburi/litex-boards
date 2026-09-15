@@ -169,6 +169,8 @@ class BaseSoC(SoCCore):
         with_led_chaser     = True,
         with_rgb_led        = False,
         with_buttons        = True,
+        with_ae350_uart2    = False,
+        with_ae350_gpio     = False,
         **kwargs):
         assert ddr3_rate in ("1:2", "1:4")
         ddr3_nphases = int(ddr3_rate[-1])
@@ -199,9 +201,19 @@ class BaseSoC(SoCCore):
             with_pcie      = with_pcie,
         )
         # SoCCore ----------------------------------------------------------------------------------
-        SoCCore.__init__(self, platform, sys_clk_freq, ident="LiteX SoC on Tang Mega 138K Pro", **kwargs)
+        kwargs.setdefault("ident", "LiteX SoC on Tang Mega 138K Pro")
+        SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
         if cpu_clk_freq:
             self.add_config("CPU_CLK_FREQ", cpu_clk_freq)
+
+        # AE350 hard peripherals ------------------------------------------------------------------
+        if with_ae350_uart2 or with_ae350_gpio:
+            if kwargs["cpu_type"] != "gowin_ae350":
+                raise ValueError("AE350 hard I/O requires --cpu-type=gowin_ae350")
+        if with_ae350_uart2:
+            self.cpu.connect_uart2(platform.request("serial"))
+        if with_ae350_gpio:
+            self.cpu.connect_gpio(platform.request("ae350_gpio"))
 
         # DDR3 SDRAM -------------------------------------------------------------------------------
         if with_ddr3:
@@ -313,10 +325,30 @@ def main():
     parser.add_target_argument("--eth-dynamic-ip", action="store_true",     help="Enable dynamic Ethernet IP assignment.")
     parser.add_target_argument("--remote-ip",      default="192.168.1.100", help="Remote IP address of TFTP server.")
     parser.add_target_argument("--eth-ip", "--local-ip", dest="eth_ip", default="192.168.1.50", help="Ethernet/Etherbone IP address.")
-    parser.add_target_argument("--with-pcie",      action="store_true",     help="Enable PCIe support.")
+    parser.add_target_argument("--with-pcie",         action="store_true", help="Enable PCIe support.")
+    parser.add_target_argument("--ae350-minimal",    action="store_true", help="Use an AE350 with only the minimum LiteX control peripherals.")
+    parser.add_target_argument("--without-ae350-uart2",  action="store_true", help="Disable the AE350 hard UART2.")
+    parser.add_target_argument("--without-ae350-gpio",   action="store_true", help="Disable the AE350 hard GPIO.")
     args = parser.parse_args()
 
     assert not (args.with_etherbone and args.eth_dynamic_ip)
+
+    soc_kwargs = parser.soc_argdict
+    if args.ae350_minimal:
+        soc_kwargs.update(
+            cpu_type   = "gowin_ae350",
+            with_uart  = False,
+            with_timer = False,
+            with_ctrl  = False,
+            ident      = "",
+        )
+        if soc_kwargs.get("integrated_main_ram_size") is None:
+            soc_kwargs["integrated_main_ram_size"] = 0x20000
+    is_ae350          = soc_kwargs["cpu_type"] == "gowin_ae350"
+    with_ae350_uart2 = is_ae350 and not args.without_ae350_uart2
+    with_ae350_gpio  = is_ae350 and not args.without_ae350_gpio
+    if with_ae350_uart2:
+        soc_kwargs["with_uart"] = False
 
     soc = BaseSoC(
         sys_clk_freq        = args.sys_clk_freq,
@@ -333,7 +365,10 @@ def main():
         eth_ip              = args.eth_ip,
         remote_ip           = args.remote_ip,
         eth_dynamic_ip      = args.eth_dynamic_ip,
-        **parser.soc_argdict
+        with_led_chaser     = not (args.ae350_minimal or with_ae350_gpio),
+        with_ae350_uart2    = with_ae350_uart2,
+        with_ae350_gpio     = with_ae350_gpio,
+        **soc_kwargs
     )
 
     builder = Builder(soc, **parser.builder_argdict)

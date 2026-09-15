@@ -26,6 +26,12 @@ _io = [
         IOStandard("LVCMOS33")
     ),
 
+    # AE350 hard GPIO: LED[0:2], KEY[0:2].
+    ("ae350_gpio", 0,
+        Pins("R26 L20 M25 K16 F15 G15"),
+        IOStandard("LVCMOS33")
+    ),
+
     # SPIFlash.
     ("spiflash", 0,
         Subsignal("cs_n",   Pins("P18"), IOStandard("LVCMOS33")),
